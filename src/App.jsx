@@ -1,16 +1,14 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import AddItemForm from "./components/AddItemForm";
 import InventoryTable from "./components/InventoryTable";
 import EditItemModal from "./components/EditItemModal";
 import DeleteConfirmModal from "./components/DeleteConfirmModal";
 import Toast from "./components/Toast";
+import { fetchItems, createItem, updateItem, deleteItem } from "./api/items";
 
 function App() {
   // 로컬 상태
-  const [inventory, setInventory] = useState([
-    { id: "1", name: "마스크", quantity: 20, description: "KF94" },
-    { id: "2", name: "손소독제", quantity: 8, description: "500ml" },
-  ]);
+  const [inventory, setInventory] = useState([]);
 
   const [message, setMessage] = useState({ text: "", type: "" }); // 'success' | 'error'
   const [editingItem, setEditingItem] = useState(null);
@@ -25,51 +23,91 @@ function App() {
     setTimeout(() => setMessage({ text: "", type: "" }), 2000);
   };
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const items = await fetchItems();
+        // 백엔드(DB) Item 모델이 description 대신 note로 되어있음
+        const mapped = items.map((it) => ({
+          id: it.id,
+          name: it.name,
+          quantity: it.quantity,
+          description: it.note ?? "", // note를 description에 연결
+          createdAt: it.createdAt,
+        }));
+        setInventory(mapped);
+      } catch (e) {
+        showMessage(e.message || "재고를 불러오지 못했습니다.", "error");
+      }
+    })();
+  }, []);
+
   // 추가
-  const addItem = ({ name, quantity, description }) => {
+  const addItem = async ({ name, quantity, description }) => {
     if (!name || quantity === "")
       return showMessage("상품명과 수량은 필수입니다.", "error");
     const parsed = parseInt(quantity, 10);
     if (isNaN(parsed) || parsed < 0)
       return showMessage("수량은 0 이상의 숫자여야 합니다.", "error");
 
-    const newEntry = {
-      id: crypto.randomUUID(),
-      name,
-      quantity: parsed,
-      description,
-      createdAt: new Date(),
-    };
-    setInventory((prev) =>
-      [...prev, newEntry].sort((a, b) => a.name.localeCompare(b.name))
-    );
-    showMessage("재고 항목이 추가되었습니다!", "success");
+    try {
+      const saved = await createItem({
+        name,
+        quantity: parsed,
+        note: description ?? "",
+      });
+
+      const mapped = {
+        id: saved.id,
+        name: saved.name,
+        quantity: saved.quantity,
+        description: saved.note ?? "",
+        createdAt: saved.createdAt,
+      };
+
+      setInventory((prev) =>
+        [...prev, mapped].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      showMessage("재고 항목이 추가되었습니다!", "success");
+    } catch (e) {
+      showMessage(e.message || "추가에 실패했습니다.", "error");
+    }
   };
 
   // 수정 저장
-  const saveEditedItem = (next) => {
+  const saveEditedItem = async (next) => {
     if (!next.name || next.quantity === "")
       return showMessage("상품명/수량을 확인해주세요.", "error");
     const parsed = parseInt(next.quantity, 10);
     if (isNaN(parsed) || parsed < 0)
       return showMessage("수량은 0 이상의 숫자여야 합니다.", "error");
 
-    setInventory((prev) =>
-      prev
-        .map((it) =>
-          it.id === next.id
-            ? {
-                ...it,
-                name: next.name,
-                quantity: parsed,
-                description: next.description,
-              }
-            : it
-        )
-        .sort((a, b) => a.name.localeCompare(b.name))
-    );
-    setEditingItem(null);
-    showMessage("재고 항목이 업데이트되었습니다!", "success");
+    try {
+      const saved = await updateItem(next.id, {
+        name: next.name,
+        quantity: parsed,
+        note: next.description ?? "",
+      });
+
+      setInventory((prev) =>
+        prev
+          .map((it) =>
+            it.id === next.id
+              ? {
+                  ...it,
+                  name: saved.name,
+                  quantity: saved.quantity,
+                  description: saved.note ?? "",
+                }
+              : it
+          )
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setEditingItem(null);
+      showMessage("재고 항목이 업데이트되었습니다!", "success");
+    } catch (e) {
+      showMessage(e.message || "수정에 실패했습니다.", "error");
+    }
   };
 
   // 삭제
@@ -79,12 +117,17 @@ function App() {
     setShowDeleteConfirmModal(true);
   };
 
-  const confirmDelete = () => {
-    setInventory((prev) => prev.filter((it) => it.id !== itemToDeleteId));
-    setShowDeleteConfirmModal(false);
-    setItemToDeleteId(null);
-    setItemToDeleteName("");
-    showMessage("재고 항목이 삭제되었습니다!", "success");
+  const confirmDelete = async () => {
+    try {
+      await deleteItem(itemToDeleteId);
+      setInventory((prev) => prev.filter((it) => it.id !== itemToDeleteId));
+      setShowDeleteConfirmModal(false);
+      setItemToDeleteId(null);
+      setItemToDeleteName("");
+      showMessage("재고 항목이 삭제되었습니다!", "success");
+    } catch (e) {
+      showMessage(e.message || "삭제에 실패했습니다.", "error");
+    }
   };
 
   const cancelDelete = () => {
